@@ -20,9 +20,10 @@ import { fillThumbs, initThumbs, loadFolder, thumbs } from './thumbs.js';
 import { askConfirm, dateTime, esc, fmtDate, mediaCount, showToast, stars } from './ui.js';
 import { createUploader } from './upload.js';
 import { emptyQuery, filterOptions, isEmptyQuery, search } from './search.js';
+import { createSelection } from './selection.js';
 import { openViewer } from './viewer.js';
 
-const APP_VERSION = 'Web 0.4.1 (Phase 4)';
+const APP_VERSION = 'Web 0.5 (Phase 5)';
 const REFRESH_THROTTLE_MS = 2 * 60 * 1000;
 
 const root = document.getElementById('app');
@@ -47,6 +48,9 @@ const uploader = createUploader({
     if (n) rescan(); // neue Fotos aus OneDrive holen (mit Aufnahmedatum)
   },
 });
+
+// Auswahl-Modus (ZIP, Teilen, Herz/Ausblenden für viele Fotos)
+const selection = createSelection({ drive, flag: (ids, field, value) => flagPhotos(ids, field, value), onChange: () => render() });
 
 const state = {
   user: null,
@@ -235,6 +239,7 @@ function render(routeChanged = false) {
   const scrollTo = route === 'suche' && lastRoute !== 'suche' ? (state.searchScroll ?? 0) : 0;
   const moved = routeChanged || route !== lastRoute;
   lastRoute = route;
+  if (moved) selection.stop(true); // anderer Bildschirm: Auswahl endet
   if (moved) requestAnimationFrame(() => window.scrollTo(0, scrollTo));
   if (!state.user) return renderWelcome();
   const [screen, id] = route.split('/');
@@ -440,7 +445,8 @@ function drawResults() {
     // Fotos mit Herz: pro Event eine Überschrift und das Raster; der Betrachter blättert durch alle Treffer
     const all = hits.flatMap((h) => h.liked);
     let i = 0;
-    box.innerHTML = `<p class="count">${all.length === 1 ? '1 Foto' : `${all.length} Fotos`} mit Herz in ${hits.length === 1 ? '1 Event' : `${hits.length} Events`}</p>
+    const folderOf = new Map(hits.flatMap((h) => h.liked.map((m) => [m.id, pretty(h.node.name)])));
+    box.innerHTML = `<div class="row between countrow"><p class="count">${all.length === 1 ? '1 Foto' : `${all.length} Fotos`} mit Herz in ${hits.length === 1 ? '1 Event' : `${hits.length} Events`}</p>${selectButton('suche')}</div>
       ${hits.map((h) => `<div class="section">
         <a class="hitlink" href="#/f/${encodeURIComponent(h.node.id)}">${h.node.names.length > 1 ? `<span class="muted">${esc(h.node.names.slice(0, -1).map(pretty).join(' › '))} › </span>` : ''}${esc(pretty(h.node.name))}</a>
         <div class="grid">${grid(h.liked, 'data-hit', false, (i += h.liked.length) - h.liked.length)}</div>
@@ -456,7 +462,11 @@ function drawResults() {
           onRemove: (p) => flagPhotos([p.id], 'hidden', true),
         });
     });
+    box.querySelector('[data-select-on]')?.addEventListener('click', () => selection.start('suche'));
+    box.querySelector('[data-select-off]')?.addEventListener('click', () => selection.stop());
+    selection.mount(box, 'suche', { cells: '[data-hit]', attr: 'data-hit', items: all, folderOf: (m) => folderOf.get(m.id), name: 'Fotos mit Herz' });
   } else {
+    selection.stop(true);
     box.innerHTML = `${isEmptyQuery(q) ? '' : `<p class="count">${hits.length === 1 ? '1 Treffer' : `${hits.length} Treffer`}</p>`}
       <div class="section"><div class="cards">${hits.map((h) => eventCard(h.node, true)).join('')}</div></div>`;
   }
@@ -497,7 +507,7 @@ function renderFolder(id) {
     ${isRoot ? '' : docsSection(node)}
     ${isEmptyFolder(node) ? `<div class="section"><button class="btn outline small danger" data-delete-folder>${icon('delete', 18)} Leeren Ordner löschen</button>
       <p class="muted small">Falsch angelegt? Ein leerer Ordner (ohne Fotos, Dokumente und Unterordner) darf weg.</p></div>` : ''}
-    ${fab(isRoot ? null : node.id)}`;
+    ${selection.active(`f:${node.id}`) ? '' : fab(isRoot ? null : node.id)}`;
   root.querySelector('[data-delete-folder]')?.addEventListener('click', () => deleteFolder(node));
   renderScanLine();
   root.querySelectorAll('[data-photo]').forEach((b) => {
@@ -532,6 +542,8 @@ function renderFolder(id) {
     await flagPhotos(stills.map((m) => m.id), 'liked', liked);
   });
   root.querySelector('[data-add-media]')?.addEventListener('click', () => pickMedia(node));
+  bindSelectButtons();
+  selection.mount(root, `f:${node.id}`, { cells: '[data-photo]', attr: 'data-photo', items: media, folderOf: () => pretty(node.name), name: pretty(node.name) });
   root.querySelector('[data-retry]')?.addEventListener('click', () => uploader.retryFailed());
   bindDocs(node);
   // Fotoraster: alle Vorschaubilder des Ordners auf einmal, Unterordner-Titelbilder einzeln
@@ -548,13 +560,27 @@ function mediaSection(node, isRoot) {
   const allLiked = stills.length > 0 && likedCount === stills.length;
   return `<div class="section">
     <div class="sectionhead"><h2>${node.videoCount ? 'Fotos und Videos' : 'Fotos'}${media.length ? ` <span class="muted">(${mediaCount(node.photoCount, node.videoCount)})</span>` : ''}</h2>
-      ${isRoot ? '' : `<button class="btn outline small" data-add-media>${icon('add', 18)} Fotos/Videos</button>`}</div>
-    ${stills.length > 1 ? `<button class="btn outline wide likeAll" data-like-all="${allLiked ? 'off' : 'on'}">${allLiked
+      <span class="row nowrap">${media.length ? selectButton(`f:${node.id}`) : ''}
+      ${isRoot || selection.active(`f:${node.id}`) ? '' : `<button class="btn outline small" data-add-media>${icon('add', 18)} Fotos/Videos</button>`}</span></div>
+    ${selection.active(`f:${node.id}`) ? '<p class="muted small">Fotos antippen zum Auswählen. Unten: als ZIP herunterladen, teilen, Herz, ausblenden.</p>' : ''}
+    ${stills.length > 1 && !selection.active(`f:${node.id}`) ? `<button class="btn outline wide likeAll" data-like-all="${allLiked ? 'off' : 'on'}">${allLiked
       ? '♡ Bei allen Fotos das Herz entfernen'
       : `♥ Alle Fotos liken${likedCount ? ` <span class="muted">(${likedCount} von ${stills.length} schon)</span>` : ''}`}</button>` : ''}
     <div id="uploadstatus">${uploadStatus(node.id)}</div>
     ${media.length ? grid(media, 'data-photo') : '<p class="muted small">Noch keine Fotos. Mit «Fotos/Videos» vom Handy oder PC hochladen.</p>'}
   </div>`;
+}
+
+/** Knopf «Auswählen» bzw. «Fertig» (Auswahl-Modus ein/aus). */
+function selectButton(scope) {
+  return selection.active(scope)
+    ? `<button class="btn small" data-select-off>Fertig</button>`
+    : `<button class="btn outline small" data-select-on="${esc(scope)}">${icon('check', 18)} Auswählen</button>`;
+}
+
+function bindSelectButtons() {
+  root.querySelector('[data-select-on]')?.addEventListener('click', (e) => selection.start(e.currentTarget.dataset.selectOn));
+  root.querySelector('[data-select-off]')?.addEventListener('click', () => selection.stop());
 }
 
 function hiddenSection(node) {
