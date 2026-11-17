@@ -355,3 +355,14 @@ select { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); 
   background: var(--surface); cursor: pointer; text-align: left; }
 .docrow > span:nth-child(2) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 body { padding-bottom: 88px; }
+
+/* Suche und Filter (Phase 4) */
+.tabs a { display: flex; align-items: center; justify-content: center; gap: 4px; }
+.filters { margin-bottom: 4px; }
+.filter { margin-bottom: 2px; }
+.filterlabel { margin: 4px 16px 4px; font-size: 0.8rem; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.04em; }
+.chip.clear { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); }
+.hitlink { display: block; margin: 0 0 8px; font-weight: 600; color: var(--text); text-decoration: none; }
+.hitlink:hover { text-decoration: underline; }
+/* Am PC (Maus) lässt sich eine Knopf-Reihe nicht wischen: dort umbrechen statt seitlich schieben */
+@media (hover: hover) and (pointer: fine) { .chips { flex-wrap: wrap; } }

@@ -1,6 +1,6 @@
 // Die Web-App: Start, Einlesen, Abgleich und Bildschirme.
 // Routen: #/ Zeitleiste · #/ordner Themen · #/f/<id> Ordner/Event · #/bearbeiten/<id> Details
-//         #/neu[/<id>] Neues Event (in Ordner <id>) · #/einstellungen
+//         #/neu[/<id>] Neues Event (in Ordner <id>) · #/suche · #/einstellungen
 
 import * as auth from './auth.js';
 import { createBook, detailsMap, favorites, allPeople, hasDetails, photoFlagsMap, setFavorite, setPhotoFlag } from './book.js';
@@ -19,9 +19,10 @@ import { createSync } from './sync.js';
 import { fillThumbs, initThumbs, loadFolder, thumbs } from './thumbs.js';
 import { askConfirm, dateTime, esc, fmtDate, mediaCount, showToast, stars } from './ui.js';
 import { createUploader } from './upload.js';
+import { emptyQuery, filterOptions, isEmptyQuery, search } from './search.js';
 import { openViewer } from './viewer.js';
 
-const APP_VERSION = 'Web 0.3.1 (Phase 3)';
+const APP_VERSION = 'Web 0.4 (Phase 4)';
 const REFRESH_THROTTLE_MS = 2 * 60 * 1000;
 
 const root = document.getElementById('app');
@@ -63,6 +64,7 @@ const state = {
   docUpload: null, // { folderId, done, total, name }
   justCreated: null,
   showHiddenFor: null, // Ordner, bei dem die ausgeblendeten Fotos aufgeklappt sind
+  query: emptyQuery(), // Suche (bleibt erhalten, wenn man ein Event öffnet und zurückkommt)
 };
 
 // ---------- Start ----------
@@ -228,8 +230,12 @@ let formOpenFor = null;
 
 function render(routeChanged = false) {
   const route = location.hash.replace(/^#\/?/, '');
-  if (routeChanged || route !== lastRoute) window.scrollTo(0, 0);
+  // Suche verlassen: Scroll-Stelle merken, beim Zurückkommen (von einem Treffer) wieder dorthin
+  if (lastRoute === 'suche' && route !== 'suche') state.searchScroll = window.scrollY;
+  const scrollTo = route === 'suche' && lastRoute !== 'suche' ? (state.searchScroll ?? 0) : 0;
+  const moved = routeChanged || route !== lastRoute;
   lastRoute = route;
+  if (moved) requestAnimationFrame(() => window.scrollTo(0, scrollTo));
   if (!state.user) return renderWelcome();
   const [screen, id] = route.split('/');
   const target = id ? decodeURIComponent(id) : null;
@@ -243,6 +249,7 @@ function render(routeChanged = false) {
   if (screen === 'einstellungen') renderSettings();
   else if (screen === 'f' && target) renderFolder(target);
   else if (screen === 'ordner') renderFolder(state.lib?.root.id ?? null);
+  else if (screen === 'suche') renderSearch();
   else renderTimeline();
   bindActions();
 }
@@ -262,6 +269,7 @@ function tabs(active) {
   return `<nav class="tabs">
     <a href="#/" class="${active === 'zeit' ? 'on' : ''}">Zeitleiste</a>
     <a href="#/ordner" class="${active === 'ordner' ? 'on' : ''}">Ordner</a>
+    <a href="#/suche" class="${active === 'suche' ? 'on' : ''}">${icon('search', 18)} Suche</a>
   </nav>`;
 }
 
@@ -346,6 +354,113 @@ function rangeText(r, running) {
   if (y1 === y2 && m1 === m2) return `${d1}.–${fmtDate(r.end)}`;
   if (y1 === y2) return `${d1}.${m1}. – ${fmtDate(r.end)}`;
   return `${fmtDate(r.start)} – ${fmtDate(r.end)}`;
+}
+
+// --- Suche und Filter ---
+
+const RATINGS = [[3, '★★★ und mehr'], [4, '★★★★ und mehr'], [5, '★★★★★']];
+
+function renderSearch() {
+  const q = state.query;
+  // Neu zeichnen während des Tippens (z. B. Abgleich fertig): Eingabefeld behält Fokus und Cursor
+  const typing = document.activeElement?.id === 'search' ? document.activeElement.selectionStart : null;
+  const o = filterOptions(state.lib);
+  const chipRow = (label, key, values, show = (v) => v) =>
+    values.length
+      ? `<div class="filter"><div class="filterlabel">${label}</div><div class="chips">${values
+          .map((v) => `<button class="chip${q[key] === v ? ' on' : ''}" data-filter="${key}" data-value="${esc(String(v))}" aria-pressed="${q[key] === v}">${esc(show(v))}</button>`)
+          .join('')}</div></div>`
+      : '';
+  root.innerHTML = `
+    ${topbar(APP_NAME)}${tabs('suche')}${statusLines()}
+    <label class="search">${icon('search', 20)}<input id="search" type="search" placeholder="Ort, Name, Person, Notizen …" value="${esc(q.text)}" aria-label="Suchen" autocomplete="off"></label>
+    <div class="filters">
+      <div class="filter"><div class="chips">
+        <button class="chip${q.likedOnly ? ' on' : ''}" data-liked aria-pressed="${q.likedOnly}">♥ Nur Fotos mit Herz</button>
+        <button class="chip clear" data-clear ${isEmptyQuery(q) ? 'hidden' : ''}>${icon('close', 16)} Alles zurücksetzen</button>
+      </div></div>
+      ${chipRow('Thema', 'theme', o.themes, pretty)}
+      ${chipRow('Jahr', 'year', o.years)}
+      ${chipRow('Person', 'person', o.people)}
+      ${o.themes.length ? chipRow('Bewertung', 'minRating', RATINGS.map(([n]) => n), (n) => RATINGS.find(([m]) => m === n)[1]) : ''}
+    </div>
+    <div id="results"></div>`;
+  renderScanLine();
+  drawResults();
+  const input = root.querySelector('#search');
+  if (typing != null) {
+    input.focus();
+    input.setSelectionRange(typing, typing);
+  }
+  input.oninput = () => {
+    q.text = input.value;
+    drawResults();
+  };
+  // «Enter» auf dem Handy: Tastatur schliessen, damit man die Treffer sieht
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter') input.blur();
+  };
+  root.querySelectorAll('[data-filter]').forEach((b) => {
+    b.onclick = () => {
+      const key = b.dataset.filter;
+      const v = key === 'minRating' ? Number(b.dataset.value) : b.dataset.value;
+      q[key] = q[key] === v ? emptyQuery()[key] : v; // nochmals antippen = Filter weg
+      render();
+    };
+  });
+  root.querySelector('[data-liked]').onclick = () => {
+    q.likedOnly = !q.likedOnly;
+    render();
+  };
+  root.querySelector('[data-clear]')?.addEventListener('click', () => {
+    state.query = emptyQuery();
+    render();
+  });
+}
+
+/** Nur die Treffer neu zeichnen (beim Tippen – das Eingabefeld bleibt, wie es ist). */
+function drawResults() {
+  const box = root.querySelector('#results');
+  if (!box) return;
+  const q = state.query;
+  const lib = state.lib;
+  // «Alles zurücksetzen» auch beim Tippen ein-/ausblenden
+  const clear = root.querySelector('[data-clear]');
+  if (clear) clear.hidden = isEmptyQuery(q);
+  if (!lib) {
+    box.innerHTML = state.scanning ? '' : '<div class="empty">Noch nichts eingelesen.</div>';
+    return;
+  }
+  const hits = search(lib, q);
+  if (!hits.length) {
+    box.innerHTML = `<div class="empty">${q.likedOnly ? 'Keine Fotos mit Herz gefunden.' : 'Nichts gefunden.'}${isEmptyQuery(q) ? '' : '<br>Andere Wörter versuchen oder Filter wegnehmen.'}</div>`;
+    return;
+  }
+  if (q.likedOnly) {
+    // Fotos mit Herz: pro Event eine Überschrift und das Raster; der Betrachter blättert durch alle Treffer
+    const all = hits.flatMap((h) => h.liked);
+    let i = 0;
+    box.innerHTML = `<p class="count">${all.length === 1 ? '1 Foto' : `${all.length} Fotos`} mit Herz in ${hits.length === 1 ? '1 Event' : `${hits.length} Events`}</p>
+      ${hits.map((h) => `<div class="section">
+        <a class="hitlink" href="#/f/${encodeURIComponent(h.node.id)}">${h.node.names.length > 1 ? `<span class="muted">${esc(h.node.names.slice(0, -1).map(pretty).join(' › '))} › </span>` : ''}${esc(pretty(h.node.name))}</a>
+        <div class="grid">${grid(h.liked, 'data-hit', false, (i += h.liked.length) - h.liked.length)}</div>
+      </div>`).join('')}`;
+    box.querySelectorAll('[data-hit]').forEach((b) => {
+      b.onclick = () =>
+        openViewer({
+          photos: toViewer(all),
+          start: Number(b.dataset.hit),
+          drive,
+          thumbs,
+          onLike: (p, liked) => flagPhotos([p.id], 'liked', liked),
+          onRemove: (p) => flagPhotos([p.id], 'hidden', true),
+        });
+    });
+  } else {
+    box.innerHTML = `${isEmptyQuery(q) ? '' : `<p class="count">${hits.length === 1 ? '1 Treffer' : `${hits.length} Treffer`}</p>`}
+      <div class="section"><div class="cards">${hits.map((h) => eventCard(h.node, true)).join('')}</div></div>`;
+  }
+  fillThumbs(box);
 }
 
 // --- Ordner / Event ---
@@ -451,9 +566,10 @@ function hiddenSection(node) {
   </div>`;
 }
 
-function grid(list, attr, withGridDiv = true) {
+function grid(list, attr, withGridDiv = true, offset = 0) {
   const cells = list
-    .map((m, i) => {
+    .map((m, j) => {
+      const i = j + offset;
       const video = isVideoName(m.name);
       const liked = isLiked(m);
       return `<button class="cell${video ? ' video' : ''}" ${attr}="${i}" aria-label="${esc(m.name)}${video ? ' (Video)' : ''}${liked ? ' (gefällt mir)' : ''}"><img data-item="${esc(m.id)}" alt="" loading="lazy">${video ? '<span class="play" aria-hidden="true">▶</span>' : ''}${liked ? '<span class="heart" aria-hidden="true">♥</span>' : ''}</button>`;
