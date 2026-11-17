@@ -22,7 +22,7 @@ import { createUploader } from './upload.js';
 import { emptyQuery, filterOptions, isEmptyQuery, search } from './search.js';
 import { openViewer } from './viewer.js';
 
-const APP_VERSION = 'Web 0.4 (Phase 4)';
+const APP_VERSION = 'Web 0.4.1 (Phase 4)';
 const REFRESH_THROTTLE_MS = 2 * 60 * 1000;
 
 const root = document.getElementById('app');
