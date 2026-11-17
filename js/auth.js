@@ -1,0 +1,89 @@
+// Anmeldung mit dem eigenen Microsoft-Konto (MSAL.js, wird in index.html geladen: globales "msal").
+// Eigene App-Registrierung "LifePhotoBook" (nur private Microsoft-Konten), Client-ID in config.js.
+
+import { CLIENT_ID } from './config.js';
+import { AuthError } from './onedrive.js';
+const SCOPES = ['Files.ReadWrite'];
+
+let app = null;
+
+/** Adresse, an die Microsoft nach der Anmeldung zurückschickt (muss im Azure-Portal eingetragen sein). */
+export function redirectUri() {
+  return new URL('.', location.href).href;
+}
+
+/** Beim Start aufrufen: verarbeitet auch die Rückkehr von der Microsoft-Anmeldung. */
+export async function initAuth() {
+  if (!CLIENT_ID) throw new Error('Die App ist noch nicht bei Microsoft registriert (CLIENT_ID in js/config.js fehlt).');
+  app = new msal.PublicClientApplication({
+    auth: {
+      clientId: CLIENT_ID,
+      authority: 'https://login.microsoftonline.com/consumers',
+      redirectUri: redirectUri(),
+      postLogoutRedirectUri: redirectUri(),
+    },
+    cache: { cacheLocation: 'localStorage' },
+  });
+  await app.initialize();
+  let result = null;
+  try {
+    result = await app.handleRedirectPromise();
+  } catch (e) {
+    console.warn('Rückkehr von der Anmeldung', e);
+  }
+  if (result?.account) app.setActiveAccount(result.account);
+  if (!app.getActiveAccount()) {
+    const accounts = app.getAllAccounts();
+    if (accounts.length) app.setActiveAccount(accounts[0]);
+  }
+  // Anmeldung nicht mehr gespeichert, aber das Konto bekannt: still im Hintergrund wieder anmelden
+  const hint = localStorage.getItem(HINT_KEY);
+  if (!app.getActiveAccount() && hint && navigator.onLine) {
+    try {
+      const r = await app.ssoSilent({ scopes: SCOPES, loginHint: hint });
+      if (r?.account) app.setActiveAccount(r.account);
+    } catch (e) {
+      console.info('Stille Anmeldung nicht möglich', e?.errorCode ?? e);
+    }
+  }
+  const a = app.getActiveAccount();
+  if (a?.username) localStorage.setItem(HINT_KEY, a.username);
+  return account();
+}
+
+/** Zuletzt verwendetes Konto (für die stille Wiederanmeldung und als Vorschlag). */
+const HINT_KEY = 'lifephotobook-login-hint';
+
+/** Angemeldetes Konto ({ name, username }) oder null. */
+export function account() {
+  const a = app?.getActiveAccount();
+  return a ? { name: a.name || a.username, username: a.username } : null;
+}
+
+export function signIn() {
+  const hint = localStorage.getItem(HINT_KEY);
+  return app.loginRedirect(hint ? { scopes: SCOPES, loginHint: hint } : { scopes: SCOPES, prompt: 'select_account' });
+}
+
+export function signOut() {
+  localStorage.removeItem(HINT_KEY);
+  return app.logoutRedirect({ account: app.getActiveAccount() });
+}
+
+/** Zugangsschlüssel für OneDrive. Ist die Anmeldung abgelaufen: AuthError. */
+export async function getToken() {
+  const a = app?.getActiveAccount();
+  if (!a) throw new AuthError('Nicht angemeldet.', 401);
+  try {
+    return (await app.acquireTokenSilent({ scopes: SCOPES, account: a })).accessToken;
+  } catch (e) {
+    if (e instanceof msal.InteractionRequiredAuthError) throw new AuthError('Bitte neu anmelden.', 401);
+    throw e;
+  }
+}
+
+/** Erneut anmelden (wenn getToken AuthError gemeldet hat). */
+export function signInAgain() {
+  const a = app.getActiveAccount();
+  return a ? app.acquireTokenRedirect({ scopes: SCOPES, account: a }) : signIn();
+}

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#A4502F"/>
+  <!-- Fotobuch: zwei aufgeschlagene Seiten mit Sonne und Hügel -->
+  <g fill="#FFFFFF">
+    <path d="M96 140c50-16 104-14 152 10v232c-48-24-102-26-152-10z"/>
+    <path d="M416 140c-50-16-104-14-152 10v232c48-24 102-26 152-10z"/>
+  </g>
+  <g fill="#A4502F">
+    <circle cx="200" cy="205" r="22"/>
+    <path d="M118 330l42-58 30 36 22-24 26 34v38c-40-16-82-20-120-14z"/>
+    <path d="M344 196c0 30-40 58-40 58s-40-28-40-58a20 20 0 0 1 40-6 20 20 0 0 1 40 6z"/>
+  </g>
+</svg>

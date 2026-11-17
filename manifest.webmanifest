@@ -1,0 +1,14 @@
+{
+  "name": "LifePhotoBook",
+  "short_name": "LifePhotoBook",
+  "description": "Deine Fotos aus dem Leben – geordnet in deinem eigenen OneDrive.",
+  "lang": "de",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#FFF8F5",
+  "theme_color": "#A4502F",
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
