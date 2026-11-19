@@ -24,7 +24,7 @@ import { emptyQuery, filterOptions, isEmptyQuery, search } from './search.js';
 import { createSelection } from './selection.js';
 import { openViewer } from './viewer.js';
 
-const APP_VERSION = 'Web 0.5.1';
+const APP_VERSION = 'Web 0.5.2';
 const REFRESH_THROTTLE_MS = 2 * 60 * 1000;
 
 const root = document.getElementById('app');
@@ -562,24 +562,25 @@ function mediaSection(node, isRoot) {
   const allLiked = stills.length > 0 && likedCount === stills.length;
   return `<div class="section">
     <div class="sectionhead"><h2>${node.videoCount ? 'Fotos und Videos' : 'Fotos'}${media.length ? ` <span class="muted">(${mediaCount(node.photoCount, node.videoCount)})</span>` : ''}</h2>
-      <span class="row nowrap">${media.length ? selectButton(`f:${node.id}`) : ''}</span></div>
-    ${selection.active(`f:${node.id}`) ? '<p class="muted small">Fotos antippen zum Auswählen. Unten: als ZIP herunterladen, teilen, Herz, ausblenden.</p>' : mediaButtons(isRoot, stills.length > 1, allLiked)}
+      ${selection.active(`f:${node.id}`) ? `<span class="row nowrap">${selectButton(`f:${node.id}`)}</span>` : ''}</div>
+    ${selection.active(`f:${node.id}`) ? '<p class="muted small">Fotos antippen zum Auswählen. Unten: als ZIP herunterladen, teilen, Herz, ausblenden.</p>' : mediaButtons(node, isRoot, stills.length > 1, allLiked)}
     <div id="uploadstatus">${uploadStatus(node.id)}</div>
-    ${media.length ? grid(media, 'data-photo') : '<p class="muted small">Noch keine Fotos. Mit «+ Fotos/Videos» vom Handy oder PC hochladen.</p>'}
+    ${media.length ? grid(media, 'data-photo') : '<p class="muted small">Noch keine Fotos.</p>'}
   </div>`;
 }
 
 /**
  * Kleine Knöpfe 2×2 (wie Tourenbuch): «+ Aus Galerie», «+ Aus OneDrive App» (nur wenn es den Ordner der
- * OneDrive-App gibt – sonst heisst der erste «+ Fotos/Videos»), «♥ Alle liken».
+ * OneDrive-App gibt – sonst heisst der erste «+ Fotos/Videos»), «♥ Alle liken», «Auswählen».
  */
-function mediaButtons(isRoot, canLike, allLiked) {
+function mediaButtons(node, isRoot, canLike, allLiked) {
   const buttons = [];
   if (!isRoot) {
     buttons.push(`<button class="btn outline mediaBtn" data-add-media>${icon('add', 16)} <span data-gallery-label>Fotos/Videos</span></button>`);
     buttons.push(`<button class="btn outline mediaBtn" data-camera-roll hidden>${icon('add', 16)} Aus OneDrive App</button>`);
   }
   if (canLike) buttons.push(`<button class="btn outline mediaBtn" data-like-all="${allLiked ? 'off' : 'on'}">${allLiked ? '♡ Herzen entfernen' : '♥ Alle liken'}</button>`);
+  if (node.media.length) buttons.push(`<button class="btn outline mediaBtn" data-select-on="${esc(`f:${node.id}`)}">${icon('check', 16)} Auswählen</button>`);
   return buttons.length ? `<div class="mediaBtns">${buttons.join('')}</div>` : '';
 }
 
@@ -734,7 +735,7 @@ function docsSection(node) {
     ${up ? `<div class="status">Lade hoch: ${esc(up.name)} (${up.done + 1} von ${up.total})</div>` : ''}
     ${node.docs.length
       ? `<div class="doclist">${node.docs.map((d, i) => `<button class="docrow" data-doc="${i}">${icon(isImageName(d.name) ? 'photo' : 'download', 20)}<span>${esc(d.name)}</span><span class="muted">${size(d.size)}</span></button>`).join('')}</div>`
-      : '<p class="muted small">z. B. Hotel- oder Flugbuchung, Prospekte, Pläne (PDF, Bilder, beliebige Dateien). Sie kommen in den Unterordner «Dokumente».</p>'}
+      : '<p class="muted small">Noch keine Dokumente.</p>'}
   </div>`;
 }
 
