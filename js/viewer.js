@@ -1,9 +1,10 @@
-// Foto-Betrachter im Vollbild (aus dem Tourenbuch übernommen): wischen, Doppeltipp = zoomen,
+// Foto-Betrachter im Vollbild (aus dem Tourenbuch übernommen): wischen, zoomen (zwei Finger, Doppeltipp, Mausrad – zoom.js),
 // Original herunterladen, teilen. Die Bilder kommen in guter Qualität (2048 px) von OneDrive.
 
 import { icon } from './icons.js';
 import { isImageName, isLiked, isVideoName } from './media.js';
 import { askConfirm, esc, showToast } from './ui.js';
+import { attachZoom } from './zoom.js';
 
 /** Videos über dieser Grösse werden nicht geteilt (müssten ganz in den Speicher geladen werden). */
 const VIDEO_SHARE_MAX = 200 * 1024 * 1024;
@@ -22,7 +23,6 @@ function videoType(name) {
  */
 export function openViewer({ photos, start, drive, thumbs, onRemove, onRestore, onLike }) {
   let index = start;
-  let zoom = false;
   const bigUrls = new Map();
 
   const el = document.createElement('div');
@@ -50,7 +50,7 @@ export function openViewer({ photos, start, drive, thumbs, onRemove, onRestore, 
         ${onRemove ? `<button class="iconbtn" data-v="remove" aria-label="Ausblenden (bleibt auf OneDrive)" title="Ausblenden (bleibt auf OneDrive)">${icon('hide')}</button>` : ''}
         ${onRestore ? `<button class="iconbtn" data-v="restore" aria-label="Wieder einblenden" title="Wieder einblenden">${icon('show')}</button>` : ''}
       </div>
-      <div class="viewer-stage${zoom && !video ? ' zoomed' : ''}">${
+      <div class="viewer-stage">${
         video
           ? `<video controls playsinline preload="metadata" ${known?.large || known?.thumb ? `poster="${esc(known.large ?? known.thumb)}"` : ''}></video><p class="viewer-msg" hidden></p>`
           : `<img alt="${esc(p.fileName)}" draggable="false">`
@@ -79,8 +79,8 @@ export function openViewer({ photos, start, drive, thumbs, onRemove, onRestore, 
       loadBig(p).then((url) => {
         if (url && photos[index] === p) img.src = url;
       });
-      stage.ondblclick = toggleZoom;
-      bindSwipe(stage); // beim Video nicht: dort wischt man auf der Zeitleiste
+      // Zoomen (zwei Finger, Doppeltipp, Mausrad) und Wischen; beim Video nicht: dort wischt man auf der Zeitleiste
+      attachZoom(stage, img, { onSwipe: go, onClose: () => close() });
     }
     // Nachbarn vorausladen (nur Fotos)
     [index - 1, index + 1].forEach((i) => photos[i] && !isVideoName(photos[i].fileName) && loadBig(photos[i]));
@@ -107,17 +107,10 @@ export function openViewer({ photos, start, drive, thumbs, onRemove, onRestore, 
     }
   }
 
-  function toggleZoom() {
-    if (isVideoName(photos[index].fileName)) return;
-    zoom = !zoom;
-    el.querySelector('.viewer-stage').classList.toggle('zoomed', zoom);
-  }
-
   function go(delta) {
     const next = index + delta;
     if (next < 0 || next >= photos.length) return;
     index = next;
-    zoom = false;
     draw();
   }
 
@@ -198,30 +191,6 @@ export function openViewer({ photos, start, drive, thumbs, onRemove, onRestore, 
     } catch (e) {
       if (e.name !== 'AbortError') showToast('Teilen fehlgeschlagen.');
     }
-  }
-
-  function bindSwipe(stage) {
-    let x0 = null;
-    let y0 = null;
-    let lastTap = 0;
-    stage.onpointerdown = (e) => {
-      x0 = e.clientX;
-      y0 = e.clientY;
-    };
-    stage.onpointerup = (e) => {
-      if (x0 == null) return;
-      const dx = e.clientX - x0;
-      const dy = e.clientY - y0;
-      x0 = null;
-      if (!zoom && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) return go(dx < 0 ? 1 : -1);
-      if (!zoom && dy > 120 && Math.abs(dy) > Math.abs(dx)) return close(); // nach unten wischen = schliessen
-      // Doppeltipp auf Touch-Geräten
-      if (e.pointerType === 'touch' && Math.abs(dx) < 10 && Math.abs(dy) < 10) {
-        const now = Date.now();
-        if (now - lastTap < 300) toggleZoom();
-        lastTap = now;
-      }
-    };
   }
 
   function onKey(e) {

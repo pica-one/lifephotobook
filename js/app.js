@@ -24,7 +24,7 @@ import { emptyQuery, filterOptions, isEmptyQuery, search } from './search.js';
 import { createSelection } from './selection.js';
 import { openViewer } from './viewer.js';
 
-const APP_VERSION = 'Web 0.5.2';
+const APP_VERSION = 'Web 0.5.3';
 const REFRESH_THROTTLE_MS = 2 * 60 * 1000;
 
 const root = document.getElementById('app');
@@ -974,6 +974,11 @@ function renderWelcome() {
       <button class="btn" id="signin" ${CLIENT_ID ? '' : 'disabled'}>Mit Microsoft anmelden</button>
     </div>`;
   root.querySelector('#signin').onclick = () => auth.signIn().catch((e) => showToast('Anmeldung fehlgeschlagen: ' + (e.message || e)));
+}
+
+// Offline-Speicher (sw.js): neue Versionen kommen so zuverlässig an. Bei jeder Änderung CACHE in sw.js erhöhen.
+if ('serviceWorker' in navigator && window.self === window.top) {
+  navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Offline-Speicher nicht verfügbar', e));
 }
 
 start();
