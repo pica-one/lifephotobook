@@ -26,7 +26,7 @@ import { createSelection } from './selection.js';
 import { openViewer } from './viewer.js';
 import { applyChoices, choicesData, renderPhotobook, safeName } from './photobook.js';
 
-const APP_VERSION = 'Web 0.6';
+const APP_VERSION = 'Web 0.6.1';
 const REFRESH_THROTTLE_MS = 2 * 60 * 1000;
 
 const root = document.getElementById('app');
@@ -485,7 +485,7 @@ function drawResults() {
 // gespeichert). Ein neues Fotobuch kommt erst in die Daten-Datei, wenn man etwas wählt oder ändert.
 
 const photobookStates = new Map(); // Entwurf-Kennung → Zustand des Fotobuch-Bildschirms
-const CHOICE_KEYS = ['pickBy', 'folders', 'foldersOff', 'excluded', 'picks', 'order', 'all', 'mode', 'title', 'overview', 'theme', 'spine', 'coverFront', 'coverBack'];
+const CHOICE_KEYS = ['titles', 'pickBy', 'folders', 'foldersOff', 'excluded', 'picks', 'order', 'all', 'mode', 'title', 'overview', 'theme', 'spine', 'coverFront', 'coverBack'];
 
 const draftById = (id) => drafts(book.current()).find((b) => b.id === id) ?? null;
 const draftChanged = (d) => Math.max(d?.name?.changed ?? 0, d?.config?.changed ?? 0);

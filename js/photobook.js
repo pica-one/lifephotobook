@@ -1146,6 +1146,8 @@ export function applyChoices(state, c) {
     }
     if (c.mode === 'all' || c.mode === 'liked') state.mode = c.mode;
     state.pickBy = c.pickBy === 'folders' ? 'folders' : 'dates';
+    state.titles = Object.fromEntries(Object.entries(c.titles && typeof c.titles === 'object' ? c.titles : {})
+      .filter(([, v]) => typeof v === 'string' && v.trim()));
     state.folders = new Set(Array.isArray(c.folders) ? c.folders : []);
     state.foldersOff = new Set(Array.isArray(c.foldersOff) ? c.foldersOff : []);
     if (typeof c.title === 'string') state.title = c.title;
@@ -1183,7 +1185,7 @@ export function choicesData(state) {
     picks: picksData(state.picks),
     order: Object.fromEntries(state.order ?? []),
     theme: state.theme, spine: state.spine, coverFront: state.coverFront, coverBack: state.coverBack,
-    pickBy: state.pickBy ?? 'dates', folders: [...(state.folders ?? [])], foldersOff: [...(state.foldersOff ?? [])],
+    titles: state.titles ?? {}, pickBy: state.pickBy ?? 'dates', folders: [...(state.folders ?? [])], foldersOff: [...(state.foldersOff ?? [])],
     ...(a ? { tourBook: {
       included: [...(a.included ?? [])], dropped: [...(a.dropped ?? [])], picks: picksData(a.picks),
       order: Object.fromEntries(a.order ?? []), title: a.title, coverFront: a.coverFront, coverBack: a.coverBack ?? [],
@@ -1234,9 +1236,15 @@ export function renderPhotobook(root, ctx, state) {
   state.treeOpen ??= new Set();
   const byFolders = state.pickBy === 'folders';
   const selection = photobookSelection(ctx.lib, state.from, state.to, all, ctx.scopeId ?? null, byFolders ? state.folders : null);
+  // Eigener Titel eines Events im Buch (statt Ordnername und Pfad; das Datum bleibt)
+  state.titles ??= {};
+  const titled = (t) => {
+    const v = state.titles[t.id]?.trim();
+    return v ? { ...t, mountain: { value: v }, routeName: { value: '' } } : t;
+  };
   const chosen = selection
     .filter((x) => inBook(x.tour.id))
-    .map((x) => ({ tour: x.tour, photos: x.photos.filter((p) => !isDropped(p)) }))
+    .map((x) => ({ tour: titled(x.tour), photos: x.photos.filter((p) => !isDropped(p)) }))
     .filter((x) => x.photos.length);
   const photoTotal = chosen.reduce((n, x) => n + x.photos.length, 0);
   const autoTitle = state.name?.trim() || (all && chosen.length === 1 ? chosen[0].tour.mountain.value : bookTitle(state.from, state.to));
@@ -1334,13 +1342,16 @@ export function renderPhotobook(root, ctx, state) {
           const open = state.open.has(x.tour.id);
           let no = 0;
           return `<details class="pbTourBox" data-id="${esc(x.tour.id)}" ${open ? 'open' : ''} style="margin:2px 0">
-          <summary style="${plain};cursor:pointer;align-items:center">
+          <summary style="${plain};cursor:pointer;align-items:center;flex-wrap:wrap">
             <span class="pbArrow" style="display:inline-block;width:12px;color:#888">▸</span>
             <input type="checkbox" class="pbTour" data-id="${esc(x.tour.id)}" ${inBook(x.tour.id) ? 'checked' : ''} ${dis}>
             <span>${esc(captionOf(x.tour))} <span class="muted">(${kept.length < x.photos.length ? `${kept.length} von ${x.photos.length}` : x.photos.length})</span>
               ${st.filter((s) => s.size).map((s) => `<span style="font-size:.75rem;padding:0 5px;border-radius:4px;color:#fff;background:${SIZE_COLORS[s.size]}">${s.size === 1 ? `${s.count} einzeln` : `${s.size}er ${s.count}/${s.pages * s.size}`}</span>`).join(' ')}
               ${b.order.has(x.tour.id) ? '<span title="Reihenfolge von Hand geändert" style="font-size:.75rem">⇄</span>' : ''}
-              ${warn ? '<span title="Eine Seite ist noch nicht voll" style="color:#c05621">⚠</span>' : ''}</span></summary>
+              ${warn ? '<span title="Eine Seite ist noch nicht voll" style="color:#c05621">⚠</span>' : ''}</span>
+            <input type="text" class="pbEvTitle" data-id="${esc(x.tour.id)}" value="${esc(state.titles[x.tour.id] ?? '')}" maxlength="60"
+              placeholder="Titel im Buch (leer = ${esc(x.tour.mountain.value)})" ${dis}
+              style="flex:1 1 200px;min-width:160px;max-width:340px;margin-left:auto;padding:4px 8px;font-size:.85rem"></summary>
           ${open ? `<div style="margin:6px 0 10px 40px">
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px">
             ${ordered.map((p) => {
@@ -1589,6 +1600,17 @@ export function renderPhotobook(root, ctx, state) {
     saveChoices();
     rerender();
   }));
+  root.querySelectorAll('.pbEvTitle').forEach((inp) => {
+    // Tippen/Klicken im Feld klappt das Event nicht auf/zu
+    inp.onclick = (e) => e.stopPropagation();
+    inp.onkeydown = (e) => e.stopPropagation();
+    inp.onkeyup = (e) => e.key === ' ' && e.preventDefault();
+    inp.oninput = () => {
+      if (inp.value.trim()) state.titles[inp.dataset.id] = inp.value;
+      else delete state.titles[inp.dataset.id];
+      saveChoices();
+    };
+  });
   const nameInput = root.querySelector('#pbName');
   nameInput.oninput = () => {
     state.name = nameInput.value;
