@@ -48,6 +48,21 @@ export function createSelection({ drive, flag, onChange }) {
       document.body.classList.remove('selecting');
       if (!silent) onChange();
     },
+    /** Alle Fotos einer Liste gleich als ZIP herunterladen (z. B. die Fotos eines Fotobuchs). */
+    async zipAll(items, folderOf, name) {
+      if (job && !job.ready) return;
+      scope = 'zip';
+      pool = items.map((m) => ({ m, folder: folderOf(m) }));
+      zipName = name;
+      ids.clear();
+      items.forEach((m) => ids.add(m.id));
+      bar?.remove();
+      bar = document.createElement('div');
+      bar.className = 'selbar';
+      document.body.appendChild(bar);
+      await makeZip(chosen());
+      api.stop(true);
+    },
     has: (id) => ids.has(id),
     count: () => ids.size,
     /** Alle (on=true) oder keine auswählen. */

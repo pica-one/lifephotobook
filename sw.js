@@ -5,7 +5,7 @@
 
 // WICHTIG: Bei jeder Änderung CACHE-Nummer erhöhen – sonst kommt die neue Version am Handy evtl. erst spät an.
 
-const CACHE = 'lifephotobook-v1';
+const CACHE = 'lifephotobook-v5';
 const MSAL = 'https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.1/lib/msal-browser.min.js';
 const SHELL = [
   './',
@@ -26,6 +26,7 @@ const SHELL = [
   'js/merge.js',
   'js/naming.js',
   'js/onedrive.js',
+  'js/photobook.js',
   'js/scan.js',
   'js/search.js',
   'js/selection.js',

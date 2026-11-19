@@ -1,9 +1,10 @@
 // Die Web-App: Start, Einlesen, Abgleich und Bildschirme.
 // Routen: #/ Zeitleiste · #/ordner Themen · #/f/<id> Ordner/Event · #/bearbeiten/<id> Details
 //         #/neu[/<id>] Neues Event (in Ordner <id>) · #/suche · #/einstellungen
+//         #/fotobuch Fotobücher · #/fotobuch/<id> Fotobuch-Entwurf · #/fotobuch-neu[/<Ordner>] neues Fotobuch
 
 import * as auth from './auth.js';
-import { createBook, detailsMap, favorites, allPeople, hasDetails, photoFlagsMap, setFavorite, setPhotoFlag } from './book.js';
+import { createBook, deleteDraft, detailsMap, drafts, favorites, allPeople, hasDetails, photoFlagsMap, setDraft, setFavorite, setPhotoFlag } from './book.js';
 import { APP_NAME, CLIENT_ID } from './config.js';
 import { renderCreate } from './create.js';
 import { renderEdit } from './edit.js';
@@ -23,8 +24,9 @@ import { cameraRollInfo, openCameraRoll } from './cameraroll.js';
 import { emptyQuery, filterOptions, isEmptyQuery, search } from './search.js';
 import { createSelection } from './selection.js';
 import { openViewer } from './viewer.js';
+import { applyChoices, choicesData, renderPhotobook, safeName } from './photobook.js';
 
-const APP_VERSION = 'Web 0.5.3';
+const APP_VERSION = 'Web 0.6';
 const REFRESH_THROTTLE_MS = 2 * 60 * 1000;
 
 const root = document.getElementById('app');
@@ -252,6 +254,8 @@ function render(routeChanged = false) {
     return screen === 'neu' ? renderNew(target) : renderEditScreen(target);
   }
   formOpenFor = null;
+  if (screen === 'fotobuch-neu') return newFotobook(target);
+  if (screen === 'fotobuch') return target ? renderFotobook(target, moved) : renderFotobookList(); // Zurück: siehe unten
   if (screen === 'einstellungen') renderSettings();
   else if (screen === 'f' && target) renderFolder(target);
   else if (screen === 'ordner') renderFolder(state.lib?.root.id ?? null);
@@ -476,6 +480,162 @@ function drawResults() {
 
 // --- Ordner / Event ---
 
+// --- Fotobuch (Phase 6) ---
+// Jedes Fotobuch ist ein Entwurf in der Daten-Datei (Name, config = Auswahl und Einstellungen, saved = wohin
+// gespeichert). Ein neues Fotobuch kommt erst in die Daten-Datei, wenn man etwas wählt oder ändert.
+
+const photobookStates = new Map(); // Entwurf-Kennung → Zustand des Fotobuch-Bildschirms
+const CHOICE_KEYS = ['pickBy', 'folders', 'foldersOff', 'excluded', 'picks', 'order', 'all', 'mode', 'title', 'overview', 'theme', 'spine', 'coverFront', 'coverBack'];
+
+const draftById = (id) => drafts(book.current()).find((b) => b.id === id) ?? null;
+const draftChanged = (d) => Math.max(d?.name?.changed ?? 0, d?.config?.changed ?? 0);
+const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
+
+/** Liste der Fotobücher (#/fotobuch). */
+function renderFotobookList() {
+  const list = drafts(book.current());
+  const scopeName = (d) => {
+    const scope = d.config?.value?.scope;
+    if (!scope) return 'Alle Events';
+    const node = state.lib?.byId.get(scope);
+    return node ? `Ordner ${node.name}` : 'Ordner (nicht mehr da)';
+  };
+  root.innerHTML = `
+    ${topbar('Fotobücher', { back: true })}
+    <div class="section"><p class="muted">Fotos mit ♥ (oder alle) als Buch zum Drucken (bookfactory, A4 quer).
+      Was du wählst, wird gemerkt – du kannst am PC anfangen und am Handy weitermachen.
+      Nur für einen Ordner: im Ordner unten «Fotobuch aus diesem Ordner».</p>
+      <div class="row"><a class="btn" href="#/fotobuch-neu">+ Neues Fotobuch</a></div></div>
+    <div class="section">${list.length
+      ? list.map((d) => `<div class="panel" style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
+          <a href="#/fotobuch/${encodeURIComponent(d.id)}" style="flex:1;min-width:0;color:inherit;text-decoration:none">
+            <b>📖 ${esc(d.name?.value || 'Fotobuch')}</b><br>
+            <span class="muted small">${esc(scopeName(d))} · geändert ${esc(fmtDate(isoDay(draftChanged(d) || d.created)))}${
+              d.saved?.value ? ` · ✓ gespeichert ${esc(fmtDate(isoDay(d.saved.value.at)))}` : ''}</span></a>
+          <button class="iconbtn" data-del="${esc(d.id)}" aria-label="Löschen" title="Löschen">${icon('delete')}</button></div>`).join('')
+      : '<div class="empty">Noch keine Fotobücher.</div>'}</div>`;
+  root.querySelectorAll('[data-del]').forEach((btn) => (btn.onclick = async () => {
+    const d = draftById(btn.dataset.del);
+    if (!d) return;
+    const ok = await askConfirm(`Fotobuch «${d.name?.value || 'Fotobuch'}» löschen?\n\nNur die Auswahl wird gelöscht. Gespeicherte PDFs im Fotobuch-Ordner auf OneDrive bleiben.`, { ok: 'Löschen' });
+    if (!ok) return;
+    photobookStates.delete(d.id);
+    await book.update((doc) => deleteDraft(doc, d.id, Date.now()));
+    syncSoon();
+  }));
+}
+
+/** Neues Fotobuch (für alle Events oder nur einen Ordner) – kommt erst bei der ersten Wahl in die Daten-Datei. */
+function newFotobook(folderId) {
+  if (!state.lib) {
+    root.innerHTML = `${topbar('Fotobuch', { back: true })}${statusLines()}`;
+    return;
+  }
+  const node = folderId ? state.lib.byId.get(folderId) : null;
+  if (folderId && !node) return location.replace('#/fotobuch');
+  const id = crypto.randomUUID();
+  const st = { name: node ? node.name : `Fotobuch ${new Date().getFullYear()}`, scope: node?.id ?? null, appliedAt: Date.now() };
+  // Für einen Ordner: Zeitraum = alle seine Fotos (sonst: dieses Jahr)
+  const events = node ? state.lib.events.filter((e) => e.range && isInside(e, node.id)) : [];
+  if (events.length) {
+    st.from = events.map((e) => e.range.start).sort()[0];
+    st.to = events.map((e) => e.range.end ?? e.range.start).sort().pop();
+  }
+  photobookStates.set(id, st);
+  location.replace(`#/fotobuch/${encodeURIComponent(id)}`);
+}
+
+/** Ein Fotobuch bearbeiten (#/fotobuch/<Entwurf>). */
+function renderFotobook(id, moved) {
+  const lib = state.lib;
+  if (!lib) {
+    root.innerHTML = `${topbar('Fotobuch', { back: true })}${statusLines()}`;
+    return;
+  }
+  const draft = draftById(id);
+  let st = photobookStates.get(id);
+  if (!st) {
+    if (!draft) {
+      root.innerHTML = `${topbar('Fotobuch', { back: true })}<div class="empty">Dieses Fotobuch gibt es nicht (mehr).</div>`;
+      return;
+    }
+    st = {};
+    photobookStates.set(id, st);
+  }
+  // Gespeicherten Stand übernehmen (beim ersten Öffnen oder wenn ein anderes Gerät ihn geändert hat)
+  let fresh = false;
+  if (draft && draftChanged(draft) > (st.appliedAt ?? 0) && !st.saveTimer) {
+    CHOICE_KEYS.forEach((k) => delete st[k]);
+    applyChoices(st, draft.config?.value ?? {});
+    st.scope = draft.config?.value?.scope ?? null;
+    st.name = draft.name?.value ?? '';
+    st.appliedAt = draftChanged(draft);
+    fresh = true;
+  }
+  // Nicht neu zeichnen, während man im Namen/Titel tippt (jede Änderung baut die Bibliothek neu)
+  const el = document.activeElement;
+  const typing = root.contains(el) && el.matches('input[type="text"],input[type="number"]');
+  if (!moved && !fresh && (st.lib === lib || typing)) return;
+  st.lib = lib;
+  renderPhotobook(root, {
+    lib, drive, scopeId: st.scope && lib.byId.has(st.scope) ? st.scope : null, demo: false,
+    onChange: () => {
+      clearTimeout(st.saveTimer);
+      st.saveTimer = setTimeout(() => saveFotobook(id, st), 800);
+    },
+    onStore: (blob, fileName) => storeFotobookPdf(id, st, blob, fileName),
+    onZip: (chosen, name) => {
+      const items = [];
+      const folderOf = new Map();
+      for (const x of chosen) {
+        const media = new Map((lib.byId.get(x.tour.id)?.media ?? []).map((m) => [m.id, m]));
+        for (const p of x.photos) {
+          const m = media.get(p.oneDriveItemId);
+          if (!m) continue;
+          items.push(m);
+          folderOf.set(m.id, x.tour.mountain.value);
+        }
+      }
+      selection.zipAll(items, (m) => folderOf.get(m.id), safeName(name));
+    },
+  }, st);
+}
+
+/** Auswahl und Name in der Daten-Datei speichern (Abgleich kurz danach). */
+async function saveFotobook(id, st) {
+  clearTimeout(st.saveTimer);
+  st.saveTimer = null;
+  const now = Date.now();
+  st.appliedAt = now;
+  const config = JSON.parse(JSON.stringify({ ...choicesData(st), scope: st.scope ?? null }));
+  await book.update((d) => setDraft(d, id, { name: st.name?.trim() || 'Fotobuch', config }, now));
+  syncSoon();
+}
+
+/** Fertiges PDF nach <Ablageordner>/_Fotobuecher/<Name>/ hochladen (gleicher Name: OneDrive vergibt einen neuen). */
+async function storeFotobookPdf(id, st, blob, fileName) {
+  if (!navigator.onLine) throw new Error('Kein Internet.');
+  await saveFotobook(id, st); // Entwurf sicher in der Daten-Datei
+  const folder = `_Fotobuecher/${safeName(st.name)}`;
+  const item = await drive.upload({ folderId: state.rootId, name: `${folder}/${fileName}` }, blob);
+  const now = Date.now();
+  st.appliedAt = now;
+  await book.update((d) => setDraft(d, id, { saved: { path: folder, at: now } }, now));
+  syncSoon();
+  return `${state.rootPath ?? 'LifePhotoBook'}/${folder}/${item.name}`;
+}
+
+/** Fotobuch eines Ordners: das zuletzt geänderte dieses Ordners öffnen, sonst ein neues. */
+function folderBookLink(folderId) {
+  const d = drafts(book.current()).find((x) => x.config?.value?.scope === folderId);
+  return d ? `#/fotobuch/${encodeURIComponent(d.id)}` : `#/fotobuch-neu/${encodeURIComponent(folderId)}`;
+}
+
+function isInside(n, id) {
+  for (let x = n; x; x = state.lib.byId.get(x.parentId)) if (x.id === id) return true;
+  return false;
+}
+
 function renderFolder(id) {
   const lib = state.lib;
   const node = id ? lib?.byId.get(id) : null;
@@ -506,6 +666,7 @@ function renderFolder(id) {
     ${media.length || !isRoot ? mediaSection(node, isRoot) : ''}
     ${node.hidden.length ? hiddenSection(node) : ''}
     ${isRoot ? '' : docsSection(node)}
+    ${!isRoot && node.totalMedia ? `<div class="section"><a class="btn outline small" href="${folderBookLink(node.id)}">📖 Fotobuch aus diesem Ordner</a></div>` : ''}
     ${isEmptyFolder(node) ? `<div class="section"><button class="btn outline small danger" data-delete-folder>${icon('delete', 18)} Leeren Ordner löschen</button>
       <p class="muted small">Falsch angelegt? Ein leerer Ordner (ohne Fotos, Dokumente und Unterordner) darf weg.</p></div>` : ''}
     ${selection.active(`f:${node.id}`) ? '' : fab(isRoot ? null : node.id)}`;
@@ -903,6 +1064,10 @@ function renderSettings() {
     <div class="section"><h2>Konto</h2>
       <div class="panel">Angemeldet als <b>${esc(state.user.name)}</b><br><span class="muted">${esc(state.user.username)}</span>
         <div class="row"><button class="btn outline" data-action="signout">Abmelden</button></div></div></div>
+    <div class="section"><h2>Fotobuch</h2>
+      <div class="panel"><p class="muted">Fotos mit ♥ (oder alle) als Buch zum Drucken.${
+        drafts(doc).length ? ` Du hast ${drafts(doc).length === 1 ? '1 Fotobuch' : `${drafts(doc).length} Fotobücher`}.` : ''}</p>
+        <div class="row"><a class="btn outline" href="#/fotobuch">📖 Fotobücher</a></div></div></div>
     <div class="section"><h2>OneDrive</h2>
       <div class="panel">Ablageordner: <b>${esc(state.rootPath ?? '–')}</b><br>
         <span class="muted">Zuletzt abgeglichen: ${state.lastScan ? esc(dateTime(state.lastScan)) : 'noch nie'}</span>
@@ -943,6 +1108,11 @@ function applyTheme(t) {
   if (t === 'system') document.documentElement.removeAttribute('data-theme');
   else document.documentElement.setAttribute('data-theme', t);
 }
+
+// Zurück im Fotobuch: das Fotobuch zeichnet sich selbst neu, darum hier für die ganze Fläche
+root.addEventListener('click', (e) => {
+  if (location.hash.startsWith('#/fotobuch') && e.target.closest('[data-action="back"]')) goBack();
+});
 
 function bindActions() {
   root.querySelectorAll('[data-action]').forEach((b) => {

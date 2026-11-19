@@ -140,3 +140,38 @@ export function setSetting(doc, key, value, now) {
   if (doc.settings[key]?.value === value) return doc;
   return { ...doc, settings: { ...doc.settings, [key]: { value, changed: now } } };
 }
+
+// ---------- Fotobuch-Entwürfe ----------
+
+/** Alle (nicht gelöschten) Fotobuch-Entwürfe, zuletzt geänderte zuerst. */
+export function drafts(doc) {
+  const last = (b) => Math.max(b.created ?? 0, b.name?.changed ?? 0, b.config?.changed ?? 0, b.saved?.changed ?? 0);
+  return (doc?.photobooks ?? []).filter((b) => b.deleted == null).sort((a, b) => last(b) - last(a));
+}
+
+/**
+ * Entwurf anlegen oder ändern. values: { name?, config?, saved? } (nur die genannten). Nur Felder, die wirklich
+ * anders sind, bekommen eine neue Zeit. Gelöschte Entwürfe bleiben gelöscht. Nichts anders → gleiches doc.
+ */
+export function setDraft(doc, id, values, now) {
+  const old = doc.photobooks.find((b) => b.id === id);
+  if (old?.deleted != null) return doc;
+  const book = old ? { ...old } : { id, created: now, deleted: null };
+  let changed = !old;
+  for (const f of ['name', 'config', 'saved']) {
+    if (!(f in values)) continue;
+    const v = values[f] ?? null;
+    if (stableStringify(book[f]?.value ?? null) === stableStringify(v)) continue;
+    book[f] = { value: v, changed: now };
+    changed = true;
+  }
+  if (!changed) return doc;
+  return { ...doc, photobooks: old ? doc.photobooks.map((b) => (b.id === id ? book : b)) : [...doc.photobooks, book] };
+}
+
+/** Entwurf löschen (nur der Eintrag in der Daten-Datei; gespeicherte PDFs auf OneDrive bleiben). */
+export function deleteDraft(doc, id, now) {
+  const old = doc.photobooks.find((b) => b.id === id);
+  if (!old || old.deleted != null) return doc;
+  return { ...doc, photobooks: doc.photobooks.map((b) => (b.id === id ? { id, created: b.created, deleted: now } : b)) };
+}
