@@ -1206,7 +1206,7 @@ export function renderPhotobook(root, ctx, state) {
   state.from ??= `${year}-01-01`;
   state.to ??= `${year}-12-31`;
   state.quality ??= 'high';
-  state.mode ??= 'liked';
+  state.mode ??= 'all'; // Standard: alle Fotos, Ordner wählen
   const all = state.mode === 'all';
   state.all ??= {};
   const b = all ? state.all : state; // Wahl der gezeigten Buchart
@@ -1230,7 +1230,7 @@ export function renderPhotobook(root, ctx, state) {
   state.overview ??= true;
   state.spine ??= COVER.spine;
   state.pickFor ??= 'front';
-  state.pickBy ??= 'dates';
+  state.pickBy ??= 'folders';
   state.folders ??= new Set();
   state.foldersOff ??= new Set();
   state.treeOpen ??= new Set();

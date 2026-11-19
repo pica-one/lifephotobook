@@ -26,7 +26,7 @@ import { createSelection } from './selection.js';
 import { openViewer } from './viewer.js';
 import { applyChoices, choicesData, renderPhotobook, safeName } from './photobook.js';
 
-const APP_VERSION = 'Web 0.6.1';
+const APP_VERSION = 'Web 0.6.2';
 const REFRESH_THROTTLE_MS = 2 * 60 * 1000;
 
 const root = document.getElementById('app');
@@ -534,7 +534,9 @@ function newFotobook(folderId) {
   const node = folderId ? state.lib.byId.get(folderId) : null;
   if (folderId && !node) return location.replace('#/fotobuch');
   const id = crypto.randomUUID();
-  const st = { name: node ? node.name : `Fotobuch ${new Date().getFullYear()}`, scope: node?.id ?? null, appliedAt: Date.now() };
+  // Standard: alle Fotos, Ordner im Baum wählen (aus einem Ordner: dieser Ordner ist schon angekreuzt)
+  const st = { name: node ? node.name : `Fotobuch ${new Date().getFullYear()}`, scope: node?.id ?? null, appliedAt: Date.now(),
+    mode: 'all', pickBy: 'folders', folders: new Set(node ? [node.id] : []) };
   // Für einen Ordner: Zeitraum = alle seine Fotos (sonst: dieses Jahr)
   const events = node ? state.lib.events.filter((e) => e.range && isInside(e, node.id)) : [];
   if (events.length) {
