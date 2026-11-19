@@ -5,6 +5,10 @@
 // UND gleicher Grösse, ist es dasselbe Foto → wird übersprungen. Gleicher Name, andere Grösse: OneDrive vergibt
 // einen neuen Namen (z. B. "IMG_1234 1.jpg") – es wird nie etwas überschrieben.
 // Die Dateien bleiben nur im Speicher: wird die Seite vorher geschlossen, müssen sie neu ausgewählt werden.
+// Zusätzlich (wie im Tourenbuch): Fotos, die schon auf OneDrive liegen (aus der OneDrive-App am Handy, Ordner
+// "Eigene Aufnahmen"), werden auf OneDrive in den Ordner KOPIERT (addCopies). So bleibt der Aufnahmeort, den
+// Android beim Hochladen aus dem Browser entfernt. Das Original bleibt, wo es ist. Gleiche Regeln: gleicher Name +
+// gleiche Grösse schon da → übersprungen; gleicher Name, andere Grösse → "Name 1.jpg" (wie OneDrive selbst).
 
 import { cleanFileName } from './naming.js';
 import { AuthError, BusyError } from './onedrive.js';
@@ -21,7 +25,7 @@ export function sameFileKey(name, size) {
  * onFinished(uploaded, skipped) wenn alles fertig ist.
  */
 export function createUploader({ drive, existing = () => [], onChange = () => {}, onFinished = () => {}, parallel = PARALLEL_UPLOADS }) {
-  const queue = []; // { folderId, file }
+  const queue = []; // { folderId, file } oder { folderId, file: { name, size }, source } (Kopie auf OneDrive)
   const active = new Map(); // job → { folderId, name, progress }
   const known = new Map(); // folderId → Set(sameFileKey) – schon vorhanden, wartend oder hochgeladen
   let running = false;
@@ -37,6 +41,11 @@ export function createUploader({ drive, existing = () => [], onChange = () => {}
     return set;
   }
 
+  /** Fotos von OneDrive (source: { id, name, size, driveId }) in den Ordner kopieren. */
+  function addCopies(folderId, sources) {
+    add(folderId, sources.map((source) => ({ name: source.name, size: source.size, source })));
+  }
+
   function add(folderId, files) {
     const keys = keysOf(folderId);
     if (!running) {
@@ -50,7 +59,7 @@ export function createUploader({ drive, existing = () => [], onChange = () => {}
         continue;
       }
       keys.add(key);
-      queue.push({ folderId, file });
+      queue.push(file.source ? { folderId, file: { name: file.name, size: file.size }, source: file.source } : { folderId, file });
     }
     stopReason = null;
     onChange();
@@ -87,14 +96,19 @@ export function createUploader({ drive, existing = () => [], onChange = () => {}
   async function worker() {
     while (queue.length) {
       const job = queue.shift();
-      active.set(job, { folderId: job.folderId, name: job.file.name, progress: 0 });
+      active.set(job, { folderId: job.folderId, name: job.file.name, progress: 0, copy: !!job.source });
       onChange();
       try {
-        await drive.upload({ folderId: job.folderId, name: cleanFileName(job.file.name) }, job.file, (p) => {
-          active.set(job, { ...active.get(job), progress: p });
-          onChange();
-        });
-        uploaded++;
+        if (job.source) {
+          if (await copyOne(job)) uploaded++;
+          else skipped++;
+        } else {
+          await drive.upload({ folderId: job.folderId, name: cleanFileName(job.file.name) }, job.file, (p) => {
+            active.set(job, { ...active.get(job), progress: p });
+            onChange();
+          });
+          uploaded++;
+        }
       } catch (e) {
         console.error(e);
         if (e instanceof AuthError || e instanceof BusyError) {
@@ -109,6 +123,22 @@ export function createUploader({ drive, existing = () => [], onChange = () => {}
         onChange();
       }
     }
+  }
+
+  /** Kopie auf OneDrive. true = kopiert, false = lag schon dort (gleicher Name + gleiche Grösse). */
+  async function copyOne(job) {
+    const { source, folderId } = job;
+    const name = cleanFileName(source.name);
+    for (let n = 0; n < 50; n++) {
+      const candidate = numberedName(name, n);
+      const there = await drive.itemInFolder(folderId, candidate);
+      if (!there) {
+        await drive.copyInto(source.id, folderId, candidate, source.driveId ?? null);
+        return true;
+      }
+      if (source.size != null && there.size === source.size) return false;
+    }
+    throw new Error('Zu viele Dateien mit diesem Namen.');
   }
 
   // Bis zu `parallel` Helfer holen sich Dateien aus der Warteschlange; wenn der letzte fertig ist, ist alles fertig.
@@ -130,6 +160,7 @@ export function createUploader({ drive, existing = () => [], onChange = () => {}
 
   return {
     add,
+    addCopies,
     retryFailed,
     isRunning: () => running,
     /** Stand für die Anzeige */
@@ -137,4 +168,11 @@ export function createUploader({ drive, existing = () => [], onChange = () => {}
       return { running, active: [...active.values()], waiting: queue.length, uploaded, skipped, failed: [...failed], stopReason };
     },
   };
+}
+
+/** "IMG_1.jpg", 2 → "IMG_1 2.jpg" (wie OneDrive bei gleichen Namen) */
+export function numberedName(name, n) {
+  if (!n) return name;
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? `${name.slice(0, dot)} ${n}${name.slice(dot)}` : `${name} ${n}`;
 }

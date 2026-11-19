@@ -19,11 +19,12 @@ import { createSync } from './sync.js';
 import { fillThumbs, initThumbs, loadFolder, thumbs } from './thumbs.js';
 import { askConfirm, dateTime, esc, fmtDate, mediaCount, showToast, stars } from './ui.js';
 import { createUploader } from './upload.js';
+import { cameraRollInfo, openCameraRoll } from './cameraroll.js';
 import { emptyQuery, filterOptions, isEmptyQuery, search } from './search.js';
 import { createSelection } from './selection.js';
 import { openViewer } from './viewer.js';
 
-const APP_VERSION = 'Web 0.5 (Phase 5)';
+const APP_VERSION = 'Web 0.5.1';
 const REFRESH_THROTTLE_MS = 2 * 60 * 1000;
 
 const root = document.getElementById('app');
@@ -542,6 +543,7 @@ function renderFolder(id) {
     await flagPhotos(stills.map((m) => m.id), 'liked', liked);
   });
   root.querySelector('[data-add-media]')?.addEventListener('click', () => pickMedia(node));
+  bindCameraRoll(node);
   bindSelectButtons();
   selection.mount(root, `f:${node.id}`, { cells: '[data-photo]', attr: 'data-photo', items: media, folderOf: () => pretty(node.name), name: pretty(node.name) });
   root.querySelector('[data-retry]')?.addEventListener('click', () => uploader.retryFailed());
@@ -560,15 +562,25 @@ function mediaSection(node, isRoot) {
   const allLiked = stills.length > 0 && likedCount === stills.length;
   return `<div class="section">
     <div class="sectionhead"><h2>${node.videoCount ? 'Fotos und Videos' : 'Fotos'}${media.length ? ` <span class="muted">(${mediaCount(node.photoCount, node.videoCount)})</span>` : ''}</h2>
-      <span class="row nowrap">${media.length ? selectButton(`f:${node.id}`) : ''}
-      ${isRoot || selection.active(`f:${node.id}`) ? '' : `<button class="btn outline small" data-add-media>${icon('add', 18)} Fotos/Videos</button>`}</span></div>
-    ${selection.active(`f:${node.id}`) ? '<p class="muted small">Fotos antippen zum Auswählen. Unten: als ZIP herunterladen, teilen, Herz, ausblenden.</p>' : ''}
-    ${stills.length > 1 && !selection.active(`f:${node.id}`) ? `<button class="btn outline wide likeAll" data-like-all="${allLiked ? 'off' : 'on'}">${allLiked
-      ? '♡ Bei allen Fotos das Herz entfernen'
-      : `♥ Alle Fotos liken${likedCount ? ` <span class="muted">(${likedCount} von ${stills.length} schon)</span>` : ''}`}</button>` : ''}
+      <span class="row nowrap">${media.length ? selectButton(`f:${node.id}`) : ''}</span></div>
+    ${selection.active(`f:${node.id}`) ? '<p class="muted small">Fotos antippen zum Auswählen. Unten: als ZIP herunterladen, teilen, Herz, ausblenden.</p>' : mediaButtons(isRoot, stills.length > 1, allLiked)}
     <div id="uploadstatus">${uploadStatus(node.id)}</div>
-    ${media.length ? grid(media, 'data-photo') : '<p class="muted small">Noch keine Fotos. Mit «Fotos/Videos» vom Handy oder PC hochladen.</p>'}
+    ${media.length ? grid(media, 'data-photo') : '<p class="muted small">Noch keine Fotos. Mit «+ Fotos/Videos» vom Handy oder PC hochladen.</p>'}
   </div>`;
+}
+
+/**
+ * Kleine Knöpfe 2×2 (wie Tourenbuch): «+ Aus Galerie», «+ Aus OneDrive App» (nur wenn es den Ordner der
+ * OneDrive-App gibt – sonst heisst der erste «+ Fotos/Videos»), «♥ Alle liken».
+ */
+function mediaButtons(isRoot, canLike, allLiked) {
+  const buttons = [];
+  if (!isRoot) {
+    buttons.push(`<button class="btn outline mediaBtn" data-add-media>${icon('add', 16)} <span data-gallery-label>Fotos/Videos</span></button>`);
+    buttons.push(`<button class="btn outline mediaBtn" data-camera-roll hidden>${icon('add', 16)} Aus OneDrive App</button>`);
+  }
+  if (canLike) buttons.push(`<button class="btn outline mediaBtn" data-like-all="${allLiked ? 'off' : 'on'}">${allLiked ? '♡ Herzen entfernen' : '♥ Alle liken'}</button>`);
+  return buttons.length ? `<div class="mediaBtns">${buttons.join('')}</div>` : '';
 }
 
 /** Knopf «Auswählen» bzw. «Fertig» (Auswahl-Modus ein/aus). */
@@ -630,7 +642,8 @@ function uploadStatus(folderId) {
     const pct = Math.round((here.reduce((n, a) => n + (a.progress ?? 0), 0) / here.length) * 100);
     const names = here.length === 1 ? esc(here[0].name) : `${here.length} Dateien gleichzeitig`;
     const done = s.uploaded ? ` · ${s.uploaded} fertig` : '';
-    html += `<div class="upload"><div class="uploadtext">Lade hoch: ${names} (${pct} %)${s.waiting ? ` · noch ${s.waiting} wartend` : ''}${done}</div>
+    const verb = here.every((a) => a.copy) ? 'Kopiere' : 'Lade hoch';
+    html += `<div class="upload"><div class="uploadtext">${verb}: ${names} (${pct} %)${s.waiting ? ` · noch ${s.waiting} wartend` : ''}${done}</div>
       <div class="bar"><span style="width:${pct}%"></span></div></div>`;
   }
   if (failed.length) {
@@ -653,6 +666,29 @@ function renderUploadOnly() {
     box.innerHTML = uploadStatus(id);
     box.querySelector('[data-retry]')?.addEventListener('click', () => uploader.retryFailed());
   });
+}
+
+/** Knopf «Aus OneDrive App» zeigen, wenn es den Ordner der OneDrive-App (mit Fotos) gibt. */
+function bindCameraRoll(node) {
+  const button = root.querySelector('[data-camera-roll]');
+  if (!button) return;
+  cameraRollInfo(drive)
+    .then((roll) => {
+      if (!roll || !button.isConnected) return;
+      button.hidden = false;
+      const label = root.querySelector('[data-gallery-label]');
+      if (label) label.textContent = 'Aus Galerie';
+    })
+    .catch(() => {}); // kein Knopf – Hochladen aus der Galerie geht trotzdem
+  button.onclick = () => {
+    if (!navigator.onLine) return showToast('Dazu braucht es Internet.');
+    openCameraRoll({
+      drive,
+      dates: node.range,
+      names: [...node.media, ...node.hidden].map((m) => m.name),
+      onCopy: (sources) => uploader.addCopies(node.id, sources),
+    });
+  };
 }
 
 function pickMedia(node) {

@@ -392,3 +392,31 @@ body.selecting { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
 .selbtns { display: flex; gap: 2px; flex: none; }
 .selbtns .iconbtn[disabled] { opacity: 0.35; }
 .selbtns .iconbtn.on { color: #d81b60; }
+
+/* Fotos-Knöpfe klein in 2×2, Auswahl aus der OneDrive-App (wie Tourenbuch) */
+.mediaBtns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px; }
+.btn.mediaBtn { min-height: 30px; padding: 0 8px; border-radius: 15px; font-size: 0.8rem; gap: 4px; white-space: nowrap; overflow: hidden; }
+.btn.mediaBtn[hidden] { display: none; }
+body.noscroll { overflow: hidden; }
+.picker { position: fixed; inset: 0; z-index: 30; background: var(--bg); color: var(--text); display: flex; flex-direction: column; }
+.picker-bar { display: flex; align-items: center; gap: 4px; padding: env(safe-area-inset-top) 4px 0; min-height: 56px; border-bottom: 1px solid var(--border); }
+.picker-title { flex: 1; min-width: 0; font-weight: 600; }
+.picker-title small { display: block; font-weight: 400; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-chips { padding-top: 8px; }
+.picker-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 16px 16px; }
+.picker-body .grid, .picker-body .panel { margin-bottom: 8px; }
+.picker-up { margin-bottom: 8px; }
+.picker-folders { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.picker-foot { display: flex; align-items: center; gap: 8px; padding: 8px 16px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); background: var(--surface); }
+.picker-foot .muted { margin-right: auto; }
+.cell.pick .tick {
+  position: absolute; top: 4px; right: 4px; z-index: 2; width: 24px; height: 24px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; font-size: 14px; line-height: 1;
+  border: 2px solid #fff; background: rgba(0, 0, 0, 0.25); color: transparent; pointer-events: none;
+}
+.cell.pick.on { outline: 3px solid var(--primary); outline-offset: -3px; }
+.cell.pick.on .tick { background: var(--primary); color: var(--on-primary); }
+.cell.pick.there { cursor: default; }
+.cell.pick.there img { opacity: 0.4; }
+.cell.pick .thereLabel { position: absolute; left: 4px; bottom: 4px; z-index: 2; padding: 1px 6px; border-radius: 6px; font-size: 0.75rem; background: rgba(0, 0, 0, 0.6); color: #fff; }
+.cell.pick .noimg { position: absolute; inset: 4px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; color: var(--text-2); overflow-wrap: anywhere; text-align: center; }
